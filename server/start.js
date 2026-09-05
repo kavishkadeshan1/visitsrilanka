@@ -6,8 +6,10 @@
  * cPanel: Set this as "Application startup file"
  */
 
+const path = require('path');
+
 // Register tsx for TypeScript support
 require('tsx/cjs');
 
 // Start the server
-require('./index.ts');
+require(path.join(__dirname, 'index.ts'));

@@ -39,13 +39,17 @@ const DEFAULT_SETTINGS: Record<string, any> = {
 
 // Initialize default settings
 function initializeSettings() {
-  const insert = db.prepare('INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)');
-  const insertMany = db.transaction(() => {
-    for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-      insert.run(key, typeof value === 'string' ? value : JSON.stringify(value));
-    }
-  });
-  insertMany();
+  try {
+    const insert = db.prepare('INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)');
+    const insertMany = db.transaction(() => {
+      for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
+        insert.run(key, typeof value === 'string' ? value : JSON.stringify(value));
+      }
+    });
+    insertMany();
+  } catch (err: any) {
+    console.warn('⚠️ initializeSettings notice:', err.message);
+  }
 }
 initializeSettings();
 

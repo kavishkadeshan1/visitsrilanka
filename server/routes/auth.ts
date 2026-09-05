@@ -9,11 +9,15 @@ const TOKEN_EXPIRY = '7d';
 
 // Ensure default admin user exists
 function ensureAdminUser() {
-  const existing = db.prepare('SELECT id FROM admin_users WHERE username = ?').get('admin');
-  if (!existing) {
-    const hash = bcrypt.hashSync('admin123', 10);
-    db.prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run('admin', hash);
-    console.log('👤 Default admin user created (username: admin, password: admin123)');
+  try {
+    const existing = db.prepare('SELECT id FROM admin_users WHERE username = ?').get('admin');
+    if (!existing) {
+      const hash = bcrypt.hashSync('admin123', 10);
+      db.prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run('admin', hash);
+      console.log('👤 Default admin user verified (username: admin)');
+    }
+  } catch (err: any) {
+    console.warn('⚠️ ensureAdminUser notice:', err.message);
   }
 }
 ensureAdminUser();
