@@ -40,8 +40,8 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploaded files
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-// Root info endpoint (useful when viewing Vercel URL in browser)
-app.get('/', (_req, res) => {
+// Root info endpoint (handles /, /api, /api/index, /api/index.ts)
+const sendApiInfo = (_req: express.Request, res: express.Response) => {
   res.json({
     name: 'Visit Sri Lanka Backend API',
     status: 'online',
@@ -57,7 +57,12 @@ app.get('/', (_req, res) => {
       auth: '/api/auth/login',
     },
   });
-});
+};
+
+app.get('/', sendApiInfo);
+app.get('/api', sendApiInfo);
+app.get('/api/index', sendApiInfo);
+app.get('/api/index.ts', sendApiInfo);
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -82,6 +87,22 @@ if (!process.env.VERCEL && fs.existsSync(DIST_DIR)) {
     res.sendFile(path.join(DIST_DIR, 'index.html'));
   });
 }
+
+// 404 fallback for unmatched API routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    path: req.url,
+    method: req.method,
+    help: 'Visit / or /api/health for available endpoints',
+  });
+});
+
+// Global error handler
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('API Error:', err);
+  res.status(500).json({ error: err.message || 'Internal Server Error' });
+});
 
 // Initialize database
 initializeDatabase();

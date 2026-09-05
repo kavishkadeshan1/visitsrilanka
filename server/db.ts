@@ -1,6 +1,7 @@
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 
 // Fallback seed data in case database is empty or native sqlite fails
 import { destinations as initialDestinations } from '../src/content/destinations';
@@ -12,56 +13,62 @@ const require = createRequire(import.meta.url);
 const isVercel = Boolean(process.env.VERCEL);
 
 let db: any = null;
-let useFallback = false;
+let useFallback = isVercel; // On Vercel, use pure-JS store to completely avoid native C++ crash
 
-// ─── Try Loading Native better-sqlite3 ───
-try {
-  const Database = require('better-sqlite3');
-
-  let dbPath: string;
-  if (isVercel) {
-    const tmpDir = '/tmp';
-    const tmpDbPath = path.join(tmpDir, 'site.db');
-
-    if (!fs.existsSync(tmpDbPath)) {
-      const bundledDbPath = path.join(process.cwd(), 'data', 'site.db');
-      if (fs.existsSync(bundledDbPath)) {
-        try {
-          fs.copyFileSync(bundledDbPath, tmpDbPath);
-          console.log('📦 Copied bundled SQLite database to /tmp/site.db');
-        } catch (err) {
-          console.error('⚠️ Could not copy database to /tmp:', err);
-        }
-      }
-    }
-    dbPath = tmpDbPath;
-  } else {
+// ─── Try Loading Native better-sqlite3 (only on non-Vercel environments) ───
+if (!isVercel) {
+  try {
+    const Database = require('better-sqlite3');
     const DATA_DIR = path.join(process.cwd(), 'data');
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    dbPath = path.join(DATA_DIR, 'site.db');
-  }
-
-  db = new Database(dbPath);
-
-  if (!isVercel) {
+    const dbPath = path.join(DATA_DIR, 'site.db');
+    db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
-  } else {
-    db.pragma('journal_mode = DELETE');
+    db.pragma('foreign_keys = ON');
+    console.log(`✅ Local SQLite connected at: ${dbPath}`);
+  } catch (err: any) {
+    console.warn('⚠️ Native better-sqlite3 not available:', err.message);
+    useFallback = true;
   }
-  db.pragma('foreign_keys = ON');
-
-  console.log(`✅ SQLite connected successfully at: ${dbPath}`);
-} catch (err: any) {
-  console.warn('⚠️ Native better-sqlite3 not available or failed to load:', err.message);
-  console.log('🔄 Switching to pure-JS database store for serverless compatibility');
-  useFallback = true;
 }
 
-// ─── Pure-JS Fallback Database Store for Serverless Environments ───
+// ─── Pure-JS Database Store for Vercel Serverless ───
 if (useFallback || !db) {
   const storePath = isVercel ? '/tmp/site-store.json' : path.join(process.cwd(), 'data', 'site-store.json');
+
+  const defaultSettings: Record<string, string> = {
+    hero_title: 'Discover the Wonder of Sri Lanka',
+    hero_subtitle: 'Ancient temples. Pristine beaches. Misty mountains. A journey curated for the curious soul.',
+    hero_badge: 'The Pearl of the Indian Ocean',
+    hero_image: '/images/hero-nine-arch.jpg',
+    whatsapp_number: '+94701234567',
+    contact_email: 'info@visitsrilanka.online',
+    about_title: 'About Visit Sri Lanka',
+    about_content: 'Your gateway to exploring the wonders of Sri Lanka.',
+    site_name: 'Visit Sri Lanka',
+    categories: JSON.stringify([
+      { title: 'Beach & Coast', image: '/images/beach-category.jpg', link: '/destinations', icon: 'Waves' },
+      { title: 'Cultural Heritage', image: 'https://images.unsplash.com/photo-1588258524675-65b32578a837?w=600&q=80', link: '/destinations', icon: 'Compass' },
+      { title: 'Wildlife Safari', image: '/images/wildlife-category.jpg', link: '/destinations', icon: 'Camera' },
+      { title: 'Hill Country', image: 'https://images.unsplash.com/photo-1566296440364-3a9fb1df10a8?w=600&q=80', link: '/destinations', icon: 'Mountain' },
+      { title: 'Adventure', image: 'https://images.unsplash.com/photo-1540202404-a2f29016b523?w=600&q=80', link: '/destinations', icon: 'Play' },
+      { title: 'Ayurveda & Wellness', image: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?w=600&q=80', link: '/destinations', icon: 'TreePalm' },
+    ]),
+    testimonials: JSON.stringify([
+      { name: 'Sarah M.', location: 'London, UK', text: 'Sri Lanka exceeded all our expectations. From the ancient temples to the pristine beaches, every day was an adventure.', rating: 5, avatar: 'https://i.pravatar.cc/100?img=1' },
+      { name: 'James & Emily', location: 'Sydney, Australia', text: 'The 10-day itinerary was perfectly planned. Seeing blue whales in Mirissa and spotting leopards at Yala - memories we\'ll treasure forever.', rating: 5, avatar: 'https://i.pravatar.cc/100?img=3' },
+      { name: 'Michael T.', location: 'New York, USA', text: 'The train ride from Kandy to Ella was worth the trip alone. Incredible scenery, friendly locals, and amazing food.', rating: 5, avatar: 'https://i.pravatar.cc/100?img=4' },
+    ]),
+    faqs: JSON.stringify([
+      { question: 'What is the best time to visit Sri Lanka?', answer: 'Sri Lanka can be visited year-round. The west and south coasts are best December to April, the east coast May to September.' },
+      { question: 'How many days do I need in Sri Lanka?', answer: 'We recommend at least 7-10 days. For a comprehensive trip, 14 days is ideal.' },
+      { question: 'Is Sri Lanka safe for tourists?', answer: 'Yes, Sri Lanka is considered one of the safest countries in Asia for tourists.' },
+      { question: 'Do I need a visa to visit Sri Lanka?', answer: 'Most nationalities need an Electronic Travel Authorization (ETA), available online.' },
+      { question: 'What are the must-visit places?', answer: 'Sigiriya Rock Fortress, Galle Fort, Kandy Temple of the Tooth, Ella, Yala National Park, and Mirissa.' },
+    ]),
+  };
 
   let memoryStore: {
     admin_users: any[];
@@ -71,7 +78,14 @@ if (useFallback || !db) {
     travel_tips: any[];
     site_settings: Record<string, any>;
   } = {
-    admin_users: [],
+    admin_users: [
+      {
+        id: 1,
+        username: 'admin',
+        password_hash: bcrypt.hashSync('admin123', 10),
+        created_at: new Date().toISOString(),
+      },
+    ],
     destinations: initialDestinations.map((d, i) => ({
       id: i + 1,
       slug: d.slug,
@@ -136,13 +150,21 @@ if (useFallback || !db) {
       faqs: JSON.stringify(t.faqs || []),
       sort_order: i,
     })),
-    site_settings: {},
+    site_settings: { ...defaultSettings },
   };
 
-  // Try loading persisted file store
+  // Load from /tmp if previously saved
   if (fs.existsSync(storePath)) {
     try {
-      memoryStore = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+      if (parsed.destinations?.length > 0) memoryStore.destinations = parsed.destinations;
+      if (parsed.itineraries?.length > 0) memoryStore.itineraries = parsed.itineraries;
+      if (parsed.blog_posts?.length > 0) memoryStore.blog_posts = parsed.blog_posts;
+      if (parsed.travel_tips?.length > 0) memoryStore.travel_tips = parsed.travel_tips;
+      if (parsed.site_settings && Object.keys(parsed.site_settings).length > 0) {
+        memoryStore.site_settings = { ...defaultSettings, ...parsed.site_settings };
+      }
+      if (parsed.admin_users?.length > 0) memoryStore.admin_users = parsed.admin_users;
     } catch {}
   }
 
@@ -210,26 +232,22 @@ if (useFallback || !db) {
           return null;
         },
         run: (...params: any[]) => {
-          // INSERT INTO admin_users
           if (s.includes('INSERT INTO admin_users')) {
             const user = { id: Date.now(), username: params[0], password_hash: params[1] };
             memoryStore.admin_users.push(user);
             persist();
             return { lastInsertRowid: user.id, changes: 1 };
           }
-          // UPDATE admin_users
           if (s.includes('UPDATE admin_users SET password_hash = ? WHERE id = ?')) {
             const user = memoryStore.admin_users.find(u => u.id === params[1]);
             if (user) { user.password_hash = params[0]; persist(); }
             return { changes: 1 };
           }
-          // INSERT / UPDATE site_settings
           if (s.includes('site_settings')) {
             memoryStore.site_settings[params[0]] = params[1];
             persist();
             return { changes: 1 };
           }
-          // INSERT INTO destinations
           if (s.includes('INSERT INTO destinations')) {
             const row = {
               id: Date.now(),
@@ -252,7 +270,6 @@ if (useFallback || !db) {
             persist();
             return { lastInsertRowid: row.id, changes: 1 };
           }
-          // UPDATE destinations
           if (s.includes('UPDATE destinations')) {
             const slug = params[params.length - 1];
             const idx = memoryStore.destinations.findIndex(d => d.slug === slug);
@@ -277,13 +294,11 @@ if (useFallback || !db) {
             }
             return { changes: 1 };
           }
-          // DELETE FROM destinations
           if (s.includes('DELETE FROM destinations')) {
             memoryStore.destinations = memoryStore.destinations.filter(d => d.slug !== params[0]);
             persist();
             return { changes: 1 };
           }
-          // INSERT INTO itineraries
           if (s.includes('INSERT INTO itineraries')) {
             const row = {
               id: Date.now(),
@@ -307,7 +322,6 @@ if (useFallback || !db) {
             persist();
             return { lastInsertRowid: row.id, changes: 1 };
           }
-          // UPDATE itineraries
           if (s.includes('UPDATE itineraries')) {
             const slug = params[params.length - 1];
             const idx = memoryStore.itineraries.findIndex(i => i.slug === slug);
@@ -333,13 +347,11 @@ if (useFallback || !db) {
             }
             return { changes: 1 };
           }
-          // DELETE FROM itineraries
           if (s.includes('DELETE FROM itineraries')) {
             memoryStore.itineraries = memoryStore.itineraries.filter(i => i.slug !== params[0]);
             persist();
             return { changes: 1 };
           }
-          // INSERT INTO blog_posts
           if (s.includes('INSERT INTO blog_posts')) {
             const row = {
               id: Date.now(),
@@ -361,7 +373,6 @@ if (useFallback || !db) {
             persist();
             return { lastInsertRowid: row.id, changes: 1 };
           }
-          // UPDATE blog_posts
           if (s.includes('UPDATE blog_posts')) {
             const slug = params[params.length - 1];
             const idx = memoryStore.blog_posts.findIndex(b => b.slug === slug);
@@ -385,13 +396,11 @@ if (useFallback || !db) {
             }
             return { changes: 1 };
           }
-          // DELETE FROM blog_posts
           if (s.includes('DELETE FROM blog_posts')) {
             memoryStore.blog_posts = memoryStore.blog_posts.filter(b => b.slug !== params[0]);
             persist();
             return { changes: 1 };
           }
-          // INSERT INTO travel_tips
           if (s.includes('INSERT INTO travel_tips')) {
             const row = {
               id: Date.now(),
@@ -410,7 +419,6 @@ if (useFallback || !db) {
             persist();
             return { lastInsertRowid: row.id, changes: 1 };
           }
-          // UPDATE travel_tips
           if (s.includes('UPDATE travel_tips')) {
             const slug = params[params.length - 1];
             const idx = memoryStore.travel_tips.findIndex(t => t.slug === slug);
@@ -431,7 +439,6 @@ if (useFallback || !db) {
             }
             return { changes: 1 };
           }
-          // DELETE FROM travel_tips
           if (s.includes('DELETE FROM travel_tips')) {
             memoryStore.travel_tips = memoryStore.travel_tips.filter(t => t.slug !== params[0]);
             persist();
@@ -444,7 +451,7 @@ if (useFallback || !db) {
   };
 }
 
-// ─── Initialize Database Schema (when using real SQLite) ───
+// ─── Initialize Database Schema (when using real SQLite locally) ───
 export function initializeDatabase() {
   if (!db || useFallback) return;
 
@@ -540,76 +547,13 @@ export function initializeDatabase() {
       );
     `);
 
-    // Ensure database is populated with initial seed if empty
-    try {
-      const destCount = (db.prepare('SELECT COUNT(*) as count FROM destinations').get() as any)?.count || 0;
-      if (destCount === 0) {
-        console.log('🌱 Empty database detected, auto-seeding initial content...');
-        const insertDest = db.prepare(`
-          INSERT OR IGNORE INTO destinations (slug, title, short_description, long_content, hero_image, region,
-            recommended_days, best_time_to_visit, tags, gallery_images, highlights, lat, lng, sort_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        initialDestinations.forEach((d, i) => {
-          insertDest.run(
-            d.slug, d.title, d.shortDescription, d.longContent, d.heroImage, d.region,
-            d.recommendedDays, d.bestTimeToVisit, JSON.stringify(d.tags),
-            JSON.stringify(d.galleryImages || []), JSON.stringify(d.highlights || []),
-            d.coordinates?.lat || 0, d.coordinates?.lng || 0, i
-          );
-        });
-
-        const insertItin = db.prepare(`
-          INSERT OR IGNORE INTO itineraries (slug, title, short_description, long_content, hero_image, duration, type,
-            tags, highlights, inclusions, starting_price, difficulty, group_size, days, sort_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        initialItineraries.forEach((it, i) => {
-          insertItin.run(
-            it.slug, it.title, it.shortDescription, it.longContent, it.heroImage,
-            it.duration, it.type, JSON.stringify(it.tags), JSON.stringify(it.highlights || []),
-            JSON.stringify(it.inclusions || []), it.startingPrice, it.difficulty,
-            it.groupSize, JSON.stringify(it.days || []), i
-          );
-        });
-
-        const insertBlog = db.prepare(`
-          INSERT OR IGNORE INTO blog_posts (slug, title, short_description, long_content, hero_image, author,
-            published_date, last_updated, category, tags, reading_time, featured, sort_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        initialBlogPosts.forEach((b, i) => {
-          insertBlog.run(
-            b.slug, b.title, b.shortDescription, b.longContent, b.heroImage,
-            b.author, b.publishedDate, b.lastUpdated, b.category, JSON.stringify(b.tags),
-            b.readingTime, b.featured ? 1 : 0, i
-          );
-        });
-
-        const insertTip = db.prepare(`
-          INSERT OR IGNORE INTO travel_tips (slug, title, short_description, long_content, hero_image, category,
-            tags, last_updated, faqs, sort_order)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        initialTravelTips.forEach((t, i) => {
-          insertTip.run(
-            t.slug, t.title, t.shortDescription, t.longContent, t.heroImage,
-            t.category, JSON.stringify(t.tags), t.lastUpdated, JSON.stringify(t.faqs || []), i
-          );
-        });
-        console.log('✅ Auto-seeded initial content successfully');
-      }
-    } catch (seedErr) {
-      console.warn('⚠️ Auto-seed check notice:', seedErr);
-    }
-
-    console.log('✅ Database tables initialized');
+    console.log('✅ Local SQLite schema verified');
   } catch (err: any) {
     console.error('⚠️ Could not initialize SQLite schema:', err.message);
   }
 }
 
-// Call table initialization immediately on load
+// Call schema initialization immediately on load
 initializeDatabase();
 
 export default db;
